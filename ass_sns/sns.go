@@ -2,11 +2,13 @@ package ass_sns
 
 import (
 	"context"
+	"fmt"
 	"github.com/EknarongAphiphutthikul/aws-sns-sqs/ass_aws"
 	"github.com/EknarongAphiphutthikul/aws-sns-sqs/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sns/types"
+	"strings"
 	"time"
 )
 
@@ -42,6 +44,7 @@ type Client interface {
 	AppendAttributesEnable()
 	Publish(topicArn, message string, ops *PublishInputOps) (*sns.PublishOutput, error)
 	GetTopicAttributes(topicArn string) (*sns.GetTopicAttributesOutput, error)
+	GetTopicArn(topicName string) (string, error)
 }
 
 type PublishInputOps struct {
@@ -69,6 +72,36 @@ func (p *client) SetDefaultTimeout(timeout time.Duration) {
 
 func (p *client) AppendAttributesEnable() {
 	p.appendAttributes = true
+}
+
+func (p *client) GetTopicArn(topicName string) (string, error) {
+	var funcCall = func(nextToken *string) (*sns.ListTopicsOutput, error) {
+		var ctx = p.ctx
+		if !utils.IsZeroValue(p.defaultTimeout) {
+			var cancelFunc context.CancelFunc
+			ctx, cancelFunc = context.WithTimeout(p.ctx, p.defaultTimeout)
+			defer cancelFunc()
+		}
+		return p.client.ListTopics(ctx, &sns.ListTopicsInput{NextToken: nextToken})
+	}
+
+	var nextToken *string
+	for {
+		var result, err = funcCall(nextToken)
+		if err != nil {
+			return "", err
+		}
+		for _, topic := range result.Topics {
+			if strings.HasSuffix(*topic.TopicArn, topicName) {
+				return *topic.TopicArn, nil
+			}
+		}
+		if result.NextToken == nil {
+			break
+		}
+		nextToken = result.NextToken
+	}
+	return "", fmt.Errorf("topic %s not found", topicName)
 }
 
 func (p *client) Publish(topicArn, message string, ops *PublishInputOps) (*sns.PublishOutput, error) {
